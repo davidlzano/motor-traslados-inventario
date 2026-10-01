@@ -1,5 +1,7 @@
 # Motor de optimización de traslados de inventario
 
+![Architecture](docs/architecture.png)
+
 Genera el plan diario de redistribución de inventario para una red de tiendas retail: qué mover, desde dónde, hacia dónde y en qué cantidad, respetando las restricciones logísticas y económicas de la operación.
 
 Este repositorio es una **reimplementación demostrativa** de un sistema que diseñé y puse en producción para una cadena con cerca de 470 tiendas a nivel nacional, donde reemplazó un ejercicio manual sobre hojas de cálculo que tomaba una semana al mes. El código aquí publicado es original, usa datos sintéticos y no contiene información de la empresa.
