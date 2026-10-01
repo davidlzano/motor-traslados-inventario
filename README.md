@@ -1,77 +1,77 @@
-# Motor de optimización de traslados de inventario
+# Inventory Transfer Optimization Engine
 
 ![Architecture](docs/architecture.png)
 
-Genera el plan diario de redistribución de inventario para una red de tiendas retail: qué mover, desde dónde, hacia dónde y en qué cantidad, respetando las restricciones logísticas y económicas de la operación.
+Generates the daily inventory redistribution plan for a retail store network: what to move, from where, to where, and in what quantity, respecting the logistical and economic constraints of the operation.
 
-Este repositorio es una **reimplementación demostrativa** de un sistema que diseñé y puse en producción para una cadena con cerca de 470 tiendas a nivel nacional, donde reemplazó un ejercicio manual sobre hojas de cálculo que tomaba una semana al mes. El código aquí publicado es original, usa datos sintéticos y no contiene información de la empresa.
-
----
-
-## El problema
-
-Una red de tiendas acumula dos desequilibrios en paralelo:
-
-- Tiendas con **faltante**: producto que se vende pero no hay en el punto
-- Tiendas con **exceso**: producto que sobra y no rota
-
-Ambos cuestan dinero. El faltante es venta perdida; el exceso es capital inmovilizado. La solución obvia es mover mercancía de donde sobra a donde falta, pero mover cuesta: hay que pagar flete, y un envío de tres unidades a ochenta kilómetros cuesta más que la mercancía que traslada.
-
-A esto se suman restricciones que hacen inviable la solución ingenua:
-
-- No toda tienda puede recibir todo producto (una tienda de adulto no vende ropa infantil)
-- Los outlets tienen capacidad finita de absorción, y varía según su rotación real
-- El producto descontinuado tiene un destino distinto al producto activo
-- Hay una distancia máxima operativamente razonable
-
-## El enfoque
-
-Es una variante del **problema de transporte**. La solución exacta por programación lineal es costosa de calcular a esta escala y, más importante, difícil de explicar a quien ejecuta los traslados en bodega.
-
-Se resuelve con una **heurística voraz priorizada en tres etapas**, ordenadas por retorno económico por unidad movida:
-
-### 1. Recuperación — Outlet → Tienda regular
-
-Producto activo que quedó atrapado en un outlet, donde se liquida con descuento, devuelto a una tienda que lo necesita y puede venderlo a precio pleno. Es la etapa de mayor retorno: recupera margen que se estaba perdiendo.
-
-### 2. Rebalanceo — Tienda regular → Tienda regular
-
-Excedente por encima del máximo parametrizado movido hacia tiendas con faltante. No cambia el inventario total de la red, solo lo reubica donde puede venderse.
-
-### 3. Evacuación — Tienda regular → Outlet
-
-Producto descontinuado que ocupa metros cuadrados en tienda regular, enviado al canal de liquidación. Se reparte entre outlets según su capacidad disponible y con un tope por SKU, para no concentrar treinta unidades del mismo producto en un solo punto.
-
-Cada etapa consume del estado que deja la anterior: una unidad asignada en la etapa 1 ya no está disponible para la 2. Eso garantiza que ninguna unidad se comprometa dos veces.
+This repository is a **demo reimplementation** of a system I designed and put into production for a chain with about 470 stores nationwide, where it replaced a manual spreadsheet exercise that took one week per month. The code published here is original, uses synthetic data, and contains no company information.
 
 ---
 
-## Decisiones de diseño
+## The problem
 
-**Distancia geodésica calculada, no tabla de distancias.** Se implementa la fórmula de Haversine sobre las coordenadas de cada ciudad. Mantener una matriz de distancias entre cientos de ciudades es un problema de mantenimiento; calcularla son seis líneas de trigonometría. Los resultados se cachean porque los mismos pares se consultan miles de veces por corrida.
+A store network accumulates two imbalances in parallel:
 
-**Dos regímenes de velocidad.** El tiempo de viaje no es lineal con la distancia: un trayecto urbano corto es mucho más lento por kilómetro que uno por carretera. Se usan 22 km/h bajo 45 km y 55 km/h por encima.
+- Stores with a **shortage**: product that sells but is not on hand at the location
+- Stores with an **excess**: product that is left over and does not turn over
 
-**Capacidad de outlet dinámica, no fija.** Asignar un tope igual a todos los outlets es un error costoso: llena de mercancía puntos que no rotan y desaprovecha los que sí. La capacidad se deriva de las ventas reales de los últimos 90 días, proyectadas a los días de cobertura permitidos, descontando el stock actual.
+Both cost money. A shortage is lost sales; an excess is tied-up capital. The obvious fix is to move merchandise from where there is too much to where there is too little, but moving costs money: freight has to be paid, and a three-unit shipment over eighty kilometers costs more than the goods it carries.
 
-**Filtro económico por par origen-destino, no por línea.** Veinte líneas de una unidad entre las mismas dos tiendas sí llenan un bulto y justifican el flete, aunque cada línea aislada parezca insignificante. Filtrar línea por línea descartaría envíos perfectamente viables.
+On top of that come constraints that make the naive solution unworkable:
 
-**Selección del origen más cercano.** Cuando varias tiendas pueden surtir un faltante, gana la más cercana. Es voraz y no garantiza el óptimo global, pero produce planes que un coordinador logístico entiende y puede auditar, que en la práctica vale más que un óptimo que nadie sabe explicar.
+- Not every store can receive every product (an adult-wear store does not sell children's clothing)
+- Outlets have finite absorption capacity, and it varies with their actual turnover
+- Discontinued product has a different destination than active product
+- There is a maximum distance that is operationally reasonable
+
+## The approach
+
+It is a variant of the **transportation problem**. The exact linear-programming solution is expensive to compute at this scale and, more importantly, hard to explain to the people who execute the transfers in the warehouse.
+
+It is solved with a **prioritized greedy heuristic in three stages**, ordered by economic return per unit moved:
+
+### 1. Recovery — Outlet → Regular store
+
+Active product that got stuck in an outlet, where it is sold at a discount, sent back to a store that needs it and can sell it at full price. This is the highest-return stage: it recovers margin that was being lost.
+
+### 2. Rebalancing — Regular store → Regular store
+
+Surplus above the configured maximum moved to stores with a shortage. It does not change the network's total inventory, it only relocates it to where it can sell.
+
+### 3. Evacuation — Regular store → Outlet
+
+Discontinued product occupying floor space in a regular store, sent to the liquidation channel. It is spread across outlets according to their available capacity and with a per-SKU cap, so as not to concentrate thirty units of the same product in a single location.
+
+Each stage consumes from the state left by the previous one: a unit assigned in stage 1 is no longer available for stage 2. This guarantees that no unit is committed twice.
 
 ---
 
-## Ejecución
+## Design decisions
 
-Requiere Python 3.10 o superior.
+**Geodesic distance computed, not a distance table.** The Haversine formula is applied to each city's coordinates. Maintaining a distance matrix across hundreds of cities is a maintenance problem; computing it takes six lines of trigonometry. Results are cached because the same pairs are queried thousands of times per run.
+
+**Two speed regimes.** Travel time is not linear with distance: a short urban trip is much slower per kilometer than a highway one. The model uses 22 km/h below 45 km and 55 km/h above it.
+
+**Dynamic outlet capacity, not fixed.** Assigning the same cap to every outlet is a costly mistake: it fills up locations that do not turn over and underuses the ones that do. Capacity is derived from actual sales over the last 90 days, projected to the allowed days of coverage, minus current stock.
+
+**Economic filter per origin-destination pair, not per line.** Twenty one-unit lines between the same two stores do fill a bundle and justify the freight, even though each line alone looks insignificant. Filtering line by line would discard perfectly viable shipments.
+
+**Nearest-origin selection.** When several stores can cover a shortage, the nearest one wins. It is greedy and does not guarantee the global optimum, but it produces plans that a logistics coordinator understands and can audit, which in practice is worth more than an optimum nobody can explain.
+
+---
+
+## Running it
+
+Requires Python 3.10 or higher.
 
 ```bash
 pip install -r requirements.txt
 
-python generar_datos.py     # crea inventario.db con datos sintéticos
-python motor_traslados.py   # genera plan_traslados.csv
+python generar_datos.py     # creates inventario.db with synthetic data
+python motor_traslados.py   # generates plan_traslados.csv
 ```
 
-Salida de ejemplo:
+Example output:
 
 ```
 Cargando inventario...
@@ -90,43 +90,43 @@ Por prioridad:
 3-EVACUACION        49       240
 ```
 
-Que se descarten 512 de 665 líneas es el comportamiento correcto: son traslados que el filtro económico considera inviables. Sin ese filtro, el plan mandaría a bodega a armar cientos de envíos que cuestan más de lo que mueven.
+The program's console output is in Spanish, as in the original system. Having 512 of 665 lines discarded is the correct behavior: those are transfers the economic filter considers unviable. Without that filter, the plan would send the warehouse to build hundreds of shipments that cost more than they move.
 
 ---
 
-## Estructura
+## Structure
 
-| Archivo | Contenido |
+| File | Contents |
 |---|---|
-| `ciudades.py` | Coordenadas y cálculo de distancias geodésicas |
-| `generar_datos.py` | Genera la red ficticia y el inventario en SQLite |
-| `motor_traslados.py` | Carga, algoritmo de tres etapas, filtros y exportación |
+| `ciudades.py` | Coordinates and geodesic distance calculation |
+| `generar_datos.py` | Generates the fictitious network and inventory in SQLite |
+| `motor_traslados.py` | Loading, three-stage algorithm, filters and export |
 
 ---
 
-## Parámetros ajustables
+## Adjustable parameters
 
-En `motor_traslados.py`:
+In `motor_traslados.py`:
 
-| Parámetro | Valor | Efecto |
+| Parameter | Value | Effect |
 |---|---|---|
-| `DIAS_COBERTURA_OUTLET` | 60 | Días de inventario que un outlet puede absorber |
-| `MAX_UNIDADES_SKU_POR_OUTLET` | 5 | Tope por SKU para no saturar un punto |
-| `MIN_UNIDADES_POR_ENVIO` | 10 | Piso de unidades por par origen-destino |
-| `MAX_KM_TRASLADO` | 100 | Distancia máxima operativamente razonable |
+| `DIAS_COBERTURA_OUTLET` | 60 | Days of inventory an outlet can absorb |
+| `MAX_UNIDADES_SKU_POR_OUTLET` | 5 | Per-SKU cap to avoid saturating one location |
+| `MIN_UNIDADES_POR_ENVIO` | 10 | Minimum units per origin-destination pair |
+| `MAX_KM_TRASLADO` | 100 | Maximum operationally reasonable distance |
 
-Estos valores son de ejemplo. En una implementación real se calibran contra el costo de flete y los tiempos de la operación.
-
----
-
-## Posibles extensiones
-
-- Costo de flete explícito por tramo, en vez de la distancia como proxy
-- Comparación contra una solución exacta por programación lineal en subconjuntos pequeños, para medir qué tan lejos queda la heurística del óptimo
-- Consolidación de envíos por ruta, agrupando destinos sobre el mismo corredor
+These values are examples. In a real implementation they are calibrated against freight cost and the operation's lead times.
 
 ---
 
-## Licencia
+## Possible extensions
+
+- Explicit freight cost per leg, instead of distance as a proxy
+- Comparison against an exact linear-programming solution on small subsets, to measure how far the heuristic lands from the optimum
+- Shipment consolidation by route, grouping destinations along the same corridor
+
+---
+
+## License
 
 MIT
